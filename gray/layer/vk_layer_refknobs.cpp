@@ -5,8 +5,9 @@
 //   - 纯只读、零改写 → 是探反作弊的低风险空层
 //   - 顺带补 render pass 级归因: 数每帧 vkCmdBeginRenderPass 次数
 //
-// 本机 logcat 会哑掉, 所以证据走文件系统: 经 /proc/self/cmdline 取包名, 把 JSON 写进
-// 该应用自己的外部 files 目录 (应用对自身包目录有写权限, harness 用 root pull)。
+// 证据走双通道: logcat 的 refknobs 标签 (立项时以为本机 logcat 哑掉, 实测只是对 shell uid
+// 不可读, `su -c logcat` 正常), 以及经 /proc/self/cmdline 取包名后写进该应用自己的外部
+// files 目录的 JSON (harness 用 root pull)。任一条成立即可判定层挂上了。
 //
 // 自包含: 只 include <vulkan/vulkan.h>, layer 协商所需的少量结构体按稳定 ABI 就地声明,
 // 不依赖 vk_layer.h 是否在 NDK 里。
@@ -261,6 +262,11 @@ static VKAPI_ATTR void VKAPI_CALL rk_DestroyDevice(VkDevice dev, const VkAllocat
 // 取下层函数指针。原来写的是 `g_dev[key(cb)].XXX`: map 的 operator[] 在查不到时会
 // **默认构造一条记录**(于是拿到空指针), 紧接着就把空指针当函数调 —— 渲染线程当场段错误,
 // 而且现象看起来像"游戏被反作弊杀了", 极难归因。这里改成只读查找 + 空指针校验。
+// 这几条失败分支一旦触发就是每次 draw 都触发, 直接 RK_LOG 会把 logcat 刷爆
+// (共享设备上尤其不礼貌)。只报第一次。
+#define RK_LOG_ONCE(...) do { static std::atomic<bool> said{false}; \
+    if (!said.exchange(true)) RK_LOG(__VA_ARGS__); } while (0)
+
 static bool dev_of(void* k, DevDisp* out) {
     std::lock_guard<std::mutex> lk(g_mtx);
     auto it = g_dev.find(k);
@@ -275,7 +281,7 @@ static VKAPI_ATTR void VKAPI_CALL rk_CmdBeginRenderPass(
     VkCommandBuffer cb, const VkRenderPassBeginInfo* bi, VkSubpassContents c) {
     DevDisp d;
     if (!dev_of(key(cb), &d) || !d.CmdBeginRenderPass) {
-        RK_LOG("CmdBeginRenderPass: 查不到下层函数, 本次不计数也不转发");
+        RK_LOG_ONCE("CmdBeginRenderPass: 查不到下层函数, 本次不计数也不转发");
         return;
     }
     g_rp++;
@@ -287,7 +293,7 @@ static VKAPI_ATTR void VKAPI_CALL rk_CmdBeginRenderPass2(
     // 驱动不支持 RenderPass2 时这里就是空的 (应用可能从 instance gipa 拿到本钩子,
     // 那条路没有 dispatch_device 里的可用性判断)。宁可不转发也不能调空指针。
     if (!dev_of(key(cb), &d) || !d.CmdBeginRenderPass2) {
-        RK_LOG("CmdBeginRenderPass2: 查不到下层函数, 本次不计数也不转发");
+        RK_LOG_ONCE("CmdBeginRenderPass2: 查不到下层函数, 本次不计数也不转发");
         return;
     }
     g_rp++;
@@ -296,7 +302,7 @@ static VKAPI_ATTR void VKAPI_CALL rk_CmdBeginRenderPass2(
 static VKAPI_ATTR VkResult VKAPI_CALL rk_QueuePresentKHR(VkQueue q, const VkPresentInfoKHR* pi) {
     DevDisp d;
     if (!dev_of(key(q), &d) || !d.QueuePresentKHR) {
-        RK_LOG("QueuePresentKHR: 查不到下层函数");
+        RK_LOG_ONCE("QueuePresentKHR: 查不到下层函数");
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     uint64_t f = ++g_frames;
