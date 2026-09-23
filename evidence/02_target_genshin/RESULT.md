@@ -30,9 +30,32 @@
 
 稳定性核查 (按 logcat 优先级字段精确过滤, 不靠关键词猜):
 - 原神进程无 F(atal) 级日志、无 tombstone、无 SIGSEGV/SIGABRT
-- 无反作杯模块告警。(一次 `tprotect` 命中是误报, 实为 `android.view.contentprotection.flags`)
-- 唯一的 FATAL 来自厂商应用 `cn.nubia.gameassist` (`HWUI Assertion failed`),
-  不是原神; 该应用 lib 目录里没有本层的 .so, 未确认与本层有因果关系 —— 待复测
+- 无反作弊模块告警。(一次 `tprotect` 命中是误报, 实为 `android.view.contentprotection.flags`)
+
+## ⚠ 但是: 全局属性把另一个应用打崩了 (实测, 已确认因果)
+
+唯一的 FATAL 来自厂商应用 `cn.nubia.gameassist`。**这不是巧合, 是本方法的直接副作用** ——
+最初记的"未确认因果"是错的, 复核证据后更正:
+
+    09-23 20:41:41.569  4388  3562 F HWUI  : Assertion failed: err < 0
+    09-23 20:41:41.636  4388  3562 F libc  : Fatal signal 6 (SIGABRT) in tid 3562 (RenderThread),
+                                             pid 4388 (ubia.gameassist)
+    F DEBUG : Process uptime: 228315s          ← 崩之前已经稳定跑了 63 小时
+
+因果链:
+1. `debug.vulkan.layers` 是**全局**属性, 对之后启动的每个 Vulkan 应用都生效
+2. gameassist 随游戏启动被拉起, 加载器去它自己的 lib 目录找 `VK_LAYER_refknobs_readonly`
+   (`searching for layers in '/system/app/GameAssist/GameAssist.apk!/lib/arm64-v8a'`)
+3. 找不到 → `vkCreateInstance` 失败 → 它的 HWUI `VulkanManager` 断言失败 → abort
+4. 被系统拉起重启, 重复上述过程: 20:41:42 / :44 / :46 / :48 / :50 / :53 / :55 …
+   **整个挂层窗口里每 ~2 秒崩溃重启一次**, 直到属性被清掉
+
+所以"层的作用域由 .so 的落点兜住"这个说法只对了一半: 没有 .so 的应用确实**不会加载**本层,
+但它们会因为找不到被指名的层而**启动失败**。在共享设备上这是会伤到别人的。
+
+已做的缓解 (`enable_layer.sh`): 挂层后自动启动目标、轮询到层加载成功就**立刻清掉全局属性**,
+把暴露窗口从"整个测试时长"压到几秒。层已经在目标进程里, 清属性不影响它。
+要保留属性得显式加 `--keep-prop`, 并接受误伤。
 
 ## 没成立的部分 (失败原因如实记)
 

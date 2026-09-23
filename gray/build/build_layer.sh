@@ -24,9 +24,19 @@ mkdir -p "$OUT"
     -llog
 cp "$ROOT/layer/VkLayer_refknobs.json" "$OUT/"
 echo "layer: $OUT/libVkLayer_refknobs.so ($(wc -c < "$OUT/libVkLayer_refknobs.so" | tr -d ' ') B)"
-"$NDK/toolchains/llvm/prebuilt/$HOST_TAG/bin/llvm-nm" -D "$OUT/libVkLayer_refknobs.so" \
-    | grep -E "vkNegotiateLoaderLayerInterfaceVersion|vkGetInstanceProcAddr|vkGetDeviceProcAddr" \
-    | sed 's/^/  export: /'
+NM="$NDK/toolchains/llvm/prebuilt/$HOST_TAG/bin/llvm-nm"
+"$NM" -D --defined-only "$OUT/libVkLayer_refknobs.so" | grep " T " | sed 's/^/  export: /'
+
+# 自检 1: 必需导出符号一个都不能少。
+# vkEnumerateInstance{Layer,Extension}Properties 尤其关键 —— Android 的加载器靠 dlsym
+# 发现层(不读 JSON manifest), 少了它们只会在真机上报
+#   E vulkan: layer library '...' missing some instance enumeration functions
+# 然后整个丢弃这个层。2026-09-23 实测踩过, 所以在这里挡住。
+for sym in vkNegotiateLoaderLayerInterfaceVersion vkGetInstanceProcAddr vkGetDeviceProcAddr \
+           vkEnumerateInstanceLayerProperties vkEnumerateInstanceExtensionProperties; do
+    "$NM" -D --defined-only "$OUT/libVkLayer_refknobs.so" | grep -q " T $sym\$" \
+        || { echo "自检失败: 缺导出符号 $sym" >&2; exit 1; }
+done
 
 # 自检: 任何残留的 DT_NEEDED 动态依赖都必须是宿主进程一定已加载的系统库。
 # libc++_shared 出现在这里 = 上机必炸, 当场失败而不是等真机报。

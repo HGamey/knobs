@@ -52,9 +52,19 @@ Adreno 840）。原始证据在 [`../evidence/`](../evidence/)。
 都不打。`gpu_debug_layer_app` 指向的"宿主包供 .so"那条路也随之不成立，
 **.so 必须放进目标应用自己的 lib 目录**。
 
-⚠ `debug.vulkan.layers` 是**全局**属性，对之后启动的每个 Vulkan 应用都生效。
-实际作用域由 .so 的落点兜住（只有 lib 目录里有这个 .so 的应用才真的加载它），
-但用完要尽早 `enable_layer.sh off`，别留在共享设备上。
+### ⚠ 这个机制有会伤到别人的副作用（实测，不是理论风险）
+
+`debug.vulkan.layers` 是**全局**属性。没有 .so 的应用确实不会加载本层，但它们会因为
+**找不到被指名的层而启动失败**：
+
+挂层期间厂商应用 `cn.nubia.gameassist`（此前已稳定运行 63 小时）
+`RenderThread` 报 `HWUI: Assertion failed: err < 0` → SIGABRT，之后在整个挂层窗口里
+**每 ~2 秒崩溃重启一次**，直到属性被清掉。证据
+[`evidence/02_target_genshin/RESULT.md`](../evidence/02_target_genshin/RESULT.md)。
+
+缓解：`enable_layer.sh` 现在挂完会自动启动目标、一旦轮询到层加载成功就**立刻清掉属性**，
+把暴露窗口压到几秒（层已在目标进程里，清属性不影响它）。要保留属性得显式 `--keep-prop`。
+用完仍要 `enable_layer.sh off`。**在共享设备上尤其注意这一条。**
 
 ### 上机才暴露的四个真问题（立项时的代码全错，全已修）
 

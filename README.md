@@ -29,6 +29,11 @@ bash gray/enable_layer.sh off               # 还原 (state 回滚 + 残留清�
 
 **层对宿主是透明的**（有无层对照：swapchain、`frames_submitted=3600`、`clean_exit=true` 全相等）。
 
+⚠ **但这个机制会误伤别的应用**：`debug.vulkan.layers` 是全局属性，挂层期间启动的、
+自己 lib 目录里没有这个 .so 的 Vulkan 应用会**启动失败**——实测厂商应用
+`cn.nubia.gameassist` 在挂层窗口里每 ~2 秒崩溃重启一次。`enable_layer.sh` 已改成
+层一加载成功就自动清掉属性（窗口压到几秒），但**共享设备上用完务必 `off`**。
+
 两处与立项时的假设不符，已改掉：
 
 - **注入机制**：生效的是 `setprop debug.vulkan.layers <层名>` + 把 .so 放进**目标应用自己的
