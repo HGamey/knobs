@@ -100,12 +100,28 @@ mount_layer() {
     echo "     Vulkan 应用可能崩溃重启 (实测 cn.nubia.gameassist 会)。用完务必跑 off。"
   else
     echo "  正在启动 $pkg; 一旦检测到层加载成功就自动清掉全局属性, 收窄误伤窗口。"
-    ashell "monkey -p $pkg -c android.intent.category.LAUNCHER 1" >/dev/null 2>&1
+    launch_pkg "$pkg"
     wait_and_narrow "$pkg"
   fi
   echo "查证据:"
   echo "  adb -s $SERIAL shell su -c 'cat /storage/emulated/0/Android/data/$pkg/files/knobs_layer_out.json'"
   echo "  adb -s $SERIAL shell su -c 'logcat -b main -d' | grep refknobs"
+}
+
+# 启动目标应用。
+#
+# 用 `am start -n <解析出的 activity>`, **不要用 monkey**。2026-09-23 无层对照实测:
+#   am start -n  → frames_submitted=3600, clean_exit=true
+#   monkey       → frames_submitted=1318, clean_exit=false
+# monkey 连一个 layer 都没挂就能把 refbench 的运行搅坏 (它会注入事件), 用它启动等于
+# 给每次测量掺进一个与被测对象无关的扰动源。
+launch_pkg() {
+  local pkg="$1" act
+  act=$(ashell "cmd package resolve-activity --brief $pkg" | tail -1 | tr -d '\r')
+  case "$act" in
+    */*) ashell "am start -n $act" >/dev/null 2>&1 ;;
+    *)   echo "  解析不到 $pkg 的启动 activity, 请手动启动它" >&2; return 1 ;;
+  esac
 }
 
 # 等目标进程真的把层加载进去, 然后立刻清掉全局属性。
