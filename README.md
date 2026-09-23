@@ -1,3 +1,5 @@
+> **本仓库已迁移**：内容连同 git 历史已并入 [BH3GEI/phonefarm](https://github.com/BH3GEI/phonefarm) 的 [`knobs/`](https://github.com/BH3GEI/phonefarm/tree/main/knobs) 目录，后续更新都在那边。本仓库不再更新，仅作归档保留。
+
 # knobs — 可改动面：黑盒系统旋钮 + 灰盒 API 注入层
 
 给 [phonefarm](https://github.com/BH3GEI/phonefarm) 的 loop_v1 harness 提供**能改什么**：
